@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A simple playable isometric Bloxorz game powered by Python matrix levels."
+    />
+    <link rel="icon" href="data:," />
+    <title>Bloxorz · Matrix Playground</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Bloxorz</h1>
+            <p>Roll the block upright into the goal.</p>
+          </div>
+        </div>
+
+        <div class="level-picker">
+          <label for="level-select">Level</label>
+          <select id="level-select" aria-label="Choose a level"></select>
+        </div>
+      </header>
+
+      <section class="play-area" aria-label="Bloxorz game board">
+        <canvas id="game" aria-label="Isometric Bloxorz board"></canvas>
+
+        <div class="legend" aria-hidden="true">
+          <span><i class="goal-dot"></i> Goal</span>
+          <span><i class="block-dot"></i> Block</span>
+        </div>
+
+        <div class="message" id="message" role="status" aria-live="polite">
+          Loading levels…
+        </div>
+      </section>
+
+      <footer class="controls-bar">
+        <div class="stats" aria-label="Game status">
+          <div><span>Moves</span><strong id="moves">0</strong></div>
+          <div><span>Position</span><strong id="position">Standing</strong></div>
+        </div>
+
+        <div class="d-pad" aria-label="Movement controls">
+          <button class="up" data-direction="up" aria-label="Move up">↑</button>
+          <button class="left" data-direction="left" aria-label="Move left">←</button>
+          <div class="pad-center" aria-hidden="true"></div>
+          <button class="right" data-direction="right" aria-label="Move right">→</button>
+          <button class="down" data-direction="down" aria-label="Move down">↓</button>
+        </div>
+
+        <div class="actions">
+          <button id="undo" class="text-button">Undo <kbd>Z</kbd></button>
+          <button id="restart" class="primary-button">Restart <kbd>R</kbd></button>
+        </div>
+      </footer>
+    </main>
+
+    <script src="game.js" defer></script>
+  </body>
+</html>
