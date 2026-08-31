@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -18,31 +17,53 @@ import levels
 PROJECT_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
+def is_valid_position(position, grid) -> bool:
+    """Check that a position is a playable cell inside the grid."""
+    if not isinstance(position, (list, tuple)) or len(position) != 2:
+        return False
+
+    row, col = position
+    if type(row) is not int or type(col) is not int:
+        return False
+
+    return (
+        0 <= row < len(grid)
+        and 0 <= col < len(grid[row])
+        and grid[row][col] == 1
+    )
+
+
 def available_levels() -> list[dict]:
-    """Return complete level definitions in numeric order."""
+    """Return every valid level dictionary in definition order."""
     result = []
 
     for name, value in vars(levels).items():
-        match = re.fullmatch(r"level(\d+)", name)
-        if not match or not isinstance(value, dict):
+        if not isinstance(value, dict):
             continue
 
         start = value.get("start")
         goal = value.get("goal")
         grid = value.get("grid")
-        if not grid or not start or not goal:
+        if (
+            not isinstance(grid, (list, tuple))
+            or not grid
+            or not all(isinstance(row, (list, tuple)) and row for row in grid)
+            or not is_valid_position(start, grid)
+            or not is_valid_position(goal, grid)
+        ):
             continue
 
         result.append(
             {
-                "number": int(match.group(1)),
+                "id": name,
+                "label": name,
                 "start": list(start),
                 "goal": list(goal),
                 "grid": grid,
             }
         )
 
-    return sorted(result, key=lambda item: item["number"])
+    return result
 
 
 class GameHandler(SimpleHTTPRequestHandler):

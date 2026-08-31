@@ -11,6 +11,8 @@ const BOARD_X_Y = 4;
 const BOARD_DEPTH_Y = 28;
 const ISO_Y = 42;
 const TILE_HEIGHT = 0.16;
+const MOVE_DURATION = 170;
+const UNDO_DURATION = 100;
 const DIRECTIONS = {
   ArrowUp: "up",
   ArrowDown: "down",
@@ -34,6 +36,8 @@ let moves = 0;
 let won = false;
 let locked = false;
 let animation = null;
+let queuedDirection = null;
+const directionFlashTimers = new Map();
 let viewport = { width: 0, height: 0, dpr: 1 };
 
 function occupiedCells(position) {
@@ -87,6 +91,20 @@ function displayMessage(text, kind = "") {
   message.className = `message ${kind}`.trim();
 }
 
+function flashDirection(direction) {
+  const button = document.querySelector(`[data-direction="${direction}"]`);
+  if (!button) return;
+
+  window.clearTimeout(directionFlashTimers.get(direction));
+  button.classList.remove("direction-flash");
+  void button.offsetWidth;
+  button.classList.add("direction-flash");
+  directionFlashTimers.set(direction, window.setTimeout(() => {
+    button.classList.remove("direction-flash");
+    directionFlashTimers.delete(direction);
+  }, 170));
+}
+
 function updateStats() {
   movesLabel.textContent = moves;
   positionLabel.textContent = state.orientation === "standing"
@@ -106,19 +124,25 @@ function resetLevel() {
   won = false;
   locked = false;
   animation = null;
+  queuedDirection = null;
   updateStats();
   displayMessage("Use arrow keys, WASD, or the controls below.");
   draw();
 }
 
-function chooseLevel(number) {
-  level = levels.find((item) => item.number === Number(number));
-  levelSelect.value = String(level.number);
+function chooseLevel(id) {
+  level = levels.find((item) => item.id === id);
+  levelSelect.value = level.id;
   resetLevel();
 }
 
-function move(direction) {
-  if (!level || locked || won) return;
+function move(direction, shouldFlash = true) {
+  if (!level || won) return;
+  if (shouldFlash) flashDirection(direction);
+  if (locked) {
+    queuedDirection = direction;
+    return;
+  }
 
   const previous = { ...state };
   const next = nextState(previous, direction);
@@ -130,8 +154,9 @@ function move(direction) {
   animation = {
     from: previous,
     to: next,
+    direction,
     start: performance.now(),
-    duration: 190,
+    duration: MOVE_DURATION,
     falling: !supported,
   };
   updateStats();
@@ -152,8 +177,9 @@ function undo() {
   animation = {
     from: current,
     to: previous,
+    direction: movementDirection(current, previous),
     start: performance.now(),
-    duration: 150,
+    duration: UNDO_DURATION,
     falling: false,
   };
   updateStats();
@@ -245,32 +271,105 @@ function drawTile(row, col) {
   }
 }
 
-function lerp(start, end, amount) {
-  return start + (end - start) * amount;
+function easeOutCubic(value) {
+  return 1 - (1 - value) ** 3;
 }
 
-function smoothStep(value) {
-  return value * value * (3 - 2 * value);
+function movementDirection(from, to) {
+  const start = stateShape(from);
+  const end = stateShape(to);
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+
+  if (Math.abs(dx) > Math.abs(dz)) return dx > 0 ? "right" : "left";
+  return dz > 0 ? "down" : "up";
+}
+
+function rotatePoint(point, pivot, axis, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dx = point.x - pivot.x;
+  const dy = point.y - pivot.y;
+  const dz = point.z - pivot.z;
+
+  if (axis === "z") {
+    return {
+      x: pivot.x + dx * cos - dy * sin,
+      y: pivot.y + dx * sin + dy * cos,
+      z: point.z,
+    };
+  }
+
+  return {
+    x: point.x,
+    y: pivot.y + dy * cos - dz * sin,
+    z: pivot.z + dy * sin + dz * cos,
+  };
+}
+
+function boxVertices(shape) {
+  const x0 = shape.x - shape.w / 2;
+  const x1 = shape.x + shape.w / 2;
+  const z0 = shape.z - shape.d / 2;
+  const z1 = shape.z + shape.d / 2;
+
+  return [
+    { x: x0, y: 0, z: z0 }, { x: x1, y: 0, z: z0 },
+    { x: x1, y: 0, z: z1 }, { x: x0, y: 0, z: z1 },
+    { x: x0, y: shape.h, z: z0 }, { x: x1, y: shape.h, z: z0 },
+    { x: x1, y: shape.h, z: z1 }, { x: x0, y: shape.h, z: z1 },
+  ];
+}
+
+function rotatingBlock(progress) {
+  const from = stateShape(animation.from);
+  const to = stateShape(animation.to);
+  const center = { x: from.x, y: from.h / 2, z: from.z };
+  const targetCenter = { x: to.x, y: to.h / 2, z: to.z };
+  const direction = animation.direction;
+  const axis = direction === "left" || direction === "right" ? "z" : "x";
+  const sign = direction === "left" || direction === "down" ? 1 : -1;
+  const fullAngle = sign * Math.PI / 2;
+  const pivot = { x: from.x, y: 0, z: from.z };
+
+  if (direction === "left") pivot.x -= from.w / 2;
+  if (direction === "right") pivot.x += from.w / 2;
+  if (direction === "up") pivot.z -= from.d / 2;
+  if (direction === "down") pivot.z += from.d / 2;
+
+  // The visual block is slightly smaller than its logical grid footprint.
+  // This small translation keeps the real rotation while ending exactly on
+  // the next cells, avoiding a visible snap at the end.
+  const endpoint = rotatePoint(center, pivot, axis, fullAngle);
+  const correction = {
+    x: targetCenter.x - endpoint.x,
+    y: targetCenter.y - endpoint.y,
+    z: targetCenter.z - endpoint.z,
+  };
+  const angle = fullAngle * progress;
+  const fallingProgress = animation.falling ? Math.max(0, (progress - 0.58) / 0.42) : 0;
+
+  const vertices = boxVertices(from).map((vertex) => {
+    const rotated = rotatePoint(vertex, pivot, axis, angle);
+    return {
+      x: rotated.x + correction.x * progress,
+      y: rotated.y + correction.y * progress - fallingProgress ** 2 * 3.2,
+      z: rotated.z + correction.z * progress,
+    };
+  });
+
+  return {
+    vertices,
+    alpha: animation.falling ? 1 - Math.max(0, (progress - 0.78) / 0.22) : 1,
+  };
 }
 
 function animatedBlock(now) {
-  if (!animation) return { ...stateShape(state), bottom: 0 };
+  if (!animation) return { shape: { ...stateShape(state), bottom: 0 } };
 
   const raw = Math.min(1, (now - animation.start) / animation.duration);
-  const progress = smoothStep(raw);
-  const from = stateShape(animation.from);
-  const to = stateShape(animation.to);
-  const falling = animation.falling;
-
-  const shape = {
-    x: lerp(from.x, to.x, progress),
-    z: lerp(from.z, to.z, progress),
-    w: lerp(from.w, to.w, progress),
-    d: lerp(from.d, to.d, progress),
-    h: lerp(from.h, to.h, progress),
-    bottom: falling ? -Math.max(0, (progress - 0.45) * 3.5) : Math.sin(progress * Math.PI) * 0.09,
-    alpha: falling ? 1 - Math.max(0, (progress - 0.7) / 0.3) : 1,
-  };
+  const progress = easeOutCubic(raw);
+  const geometry = rotatingBlock(progress);
 
   if (raw < 1) {
     requestAnimationFrame(draw);
@@ -283,11 +382,50 @@ function animatedBlock(now) {
       window.setTimeout(resetLevel, 350);
     } else if (isGoal(state)) {
       won = true;
-      displayMessage(`Level ${level.number} complete in ${moves} moves!`, "success");
+      displayMessage(`${level.label} complete in ${moves} moves!`, "success");
+    } else if (queuedDirection) {
+      const direction = queuedDirection;
+      queuedDirection = null;
+      requestAnimationFrame(() => move(direction, false));
     }
   }
 
-  return shape;
+  return geometry;
+}
+
+function drawBlockMesh(vertices, alpha, palette) {
+  const faces = [
+    { indices: [0, 3, 2, 1], fill: palette.fill },
+    { indices: [4, 5, 6, 7], fill: palette.fill },
+    { indices: [0, 1, 5, 4], fill: palette.fill },
+    { indices: [1, 2, 6, 5], fill: palette.fill },
+    { indices: [2, 3, 7, 6], fill: palette.fill },
+    { indices: [3, 0, 4, 7], fill: palette.fill },
+  ];
+
+  faces.forEach((face) => {
+    face.points = face.indices.map((index) => {
+      const vertex = vertices[index];
+      return project(vertex.x, vertex.y, vertex.z);
+    });
+    face.area = face.points.reduce((total, point, index) => {
+      const next = face.points[(index + 1) % face.points.length];
+      return total + point.x * next.y - next.x * point.y;
+    }, 0) / 2;
+    face.depth = face.indices.reduce((total, index) => (
+      total + vertices[index].x * BOARD_X_Y + vertices[index].z * BOARD_DEPTH_Y
+    ), 0) / face.indices.length;
+  });
+  const visibleFaces = faces
+    .filter((face) => face.area > 0.01)
+    .sort((a, b) => a.depth - b.depth);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  visibleFaces.forEach((face) => {
+    polygon(face.points, face.fill, palette.stroke);
+  });
+  ctx.restore();
 }
 
 function boardBounds() {
@@ -341,15 +479,16 @@ function draw(now = performance.now()) {
   tiles.forEach(([row, col]) => drawTile(row, col));
 
   ctx.save();
-  ctx.shadowColor = "#f6a92855";
-  ctx.shadowBlur = 22;
-  ctx.shadowOffsetY = 10;
-  drawPrism(animatedBlock(now), {
-    top: "#ffd376",
-    left: "#e9951e",
-    right: "#bd6812",
+  const block = animatedBlock(now);
+  const blockPalette = {
+    fill: "#f2a312",
+    top: "#f2a312",
+    left: "#f2a312",
+    right: "#f2a312",
     stroke: "#ffdf9a",
-  });
+  };
+  if (block.vertices) drawBlockMesh(block.vertices, block.alpha, blockPalette);
+  else drawPrism(block.shape, blockPalette);
   ctx.restore();
   ctx.restore();
 }
@@ -371,12 +510,12 @@ async function loadLevels() {
     if (!levels.length) throw new Error("No complete levels found");
 
     levelSelect.innerHTML = levels
-      .map((item) => `<option value="${item.number}">Level ${item.number}</option>`)
+      .map((item) => `<option value="${item.id}">${item.label}</option>`)
       .join("");
-    chooseLevel(levels[0].number);
+    chooseLevel(levels[0].id);
     resizeCanvas();
   } catch (error) {
-    displayMessage(`${error.message}. Start the game with: python3 app.py`, "danger");
+    displayMessage(`${error.message}. Start the game with: python3 backend/app.py`, "danger");
   }
 }
 

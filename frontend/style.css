@@ -189,6 +189,8 @@ select {
 }
 
 .controls-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   min-height: 112px;
   border-top: 1px solid var(--line);
 }
@@ -247,6 +249,27 @@ select {
   background: var(--accent);
   color: #231606;
   transform: scale(0.93);
+}
+
+.d-pad button.direction-flash {
+  animation: direction-flash 160ms ease-out;
+}
+
+@keyframes direction-flash {
+  0%, 100% {
+    background: #202b35;
+    color: var(--text);
+    box-shadow: none;
+    transform: scale(1);
+  }
+
+  35% {
+    border-color: var(--accent-light);
+    background: var(--accent);
+    color: #231606;
+    box-shadow: 0 0 18px #f3a82b88;
+    transform: scale(0.9);
+  }
 }
 
 .d-pad .up { grid-column: 2; grid-row: 1; }

@@ -15,8 +15,9 @@ Use the arrow keys or WASD to roll the block. You can also use the on-screen
 controls or swipe across the board on a touch screen. Stand the block upright
 on the green goal to finish a level.
 
-The level menu automatically includes every complete `levelN` dictionary from
-`backend/levels.py`, so new levels only need a `start`, `goal`, and `grid`.
+The level menu automatically includes every valid dictionary from
+`backend/levels.py`, regardless of its variable name. Each level only needs a
+playable `start`, a playable `goal`, and a non-empty `grid`.
 
 ## Project structure
 
